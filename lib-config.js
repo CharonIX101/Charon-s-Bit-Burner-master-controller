@@ -1,34 +1,28 @@
 // lib-config.js
-// Robust loader for data-master-config.js (which is JS with comments).
-// Strategy: read file -> strip "export const masterConfig =" wrapper
-// -> remove comments -> remove trailing commas -> JSON.parse the object body.
+// Robust loader for a commented JS object exported as:
+//   export const masterConfig = { ... };
 
 function stripExportWrapper(raw) {
-  // Remove everything before the first '{' and after the last '}'
-  // but first trim off the leading "export const masterConfig ="
-  // and any trailing semicolon.
-  // This keeps the inner object only.
-  const firstBrace = raw.indexOf("{");
-  const lastBrace = raw.lastIndexOf("}");
-  if (firstBrace < 0 || lastBrace < 0) return "";
-  return raw.slice(firstBrace, lastBrace + 1);
+  const first = raw.indexOf("{");
+  const last  = raw.lastIndexOf("}");
+  if (first < 0 || last < 0) return "";
+  return raw.slice(first, last + 1);
 }
 
 function stripComments(s) {
-  // Remove // line comments and /* block */ comments
-  // Careful: this is a simple stripper good enough for our config structure.
+  // Remove /* block */ and // line comments (not perfect, but OK for config)
   return s
-    // block comments
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    // line comments
-    .replace(/(^|[^:])\/\/.*$/gm, (m, p1) => p1);
+    .replace(/(^|[^:\\])\/\/.*$/gm, (m, p1) => p1); // keep 'http://'
 }
 
 function stripTrailingCommas(s) {
-  // Remove trailing commas before } or ]
-  // e.g., { a: 1, } -> { a: 1 }
-  //       [1,2,]   -> [1,2]
   return s.replace(/,\s*([}\]])/g, "$1");
+}
+
+function quoteUnquotedKeys(s) {
+  // Turn: { foo: 1, bar_baz: true } -> { "foo": 1, "bar_baz": true }
+  return s.replace(/([{\s,])([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":');
 }
 
 export async function getConfig(ns, file = "data-master-config.js") {
@@ -37,12 +31,11 @@ export async function getConfig(ns, file = "data-master-config.js") {
       ns.tprint(`lib-config: ${file} not found; using empty config`);
       return {};
     }
-    const raw = ns.read(file) || "";
-    let body = stripExportWrapper(raw);
+    let body = stripExportWrapper(ns.read(file) || "");
     body = stripComments(body);
+    body = quoteUnquotedKeys(body);
     body = stripTrailingCommas(body);
 
-    // JSON.parse will now work on the cleaned body
     const parsed = JSON.parse(body);
     return parsed || {};
   } catch (e) {
